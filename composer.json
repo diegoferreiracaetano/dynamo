@@ -1,0 +1,20 @@
+{
+    "name": "autodoc/dynamo",
+    "description": "OMG Dynamo",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Diego Ferreira Caetano",
+            "email": "dcaetano@autodoc.com.br"
+        }
+    ],
+    "require": {
+    	"php": ">=5.5.9",
+    	"aws/aws-sdk-php": "~3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "autodoc\\": "src/"
+        }
+    }
+}
