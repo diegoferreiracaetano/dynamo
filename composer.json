@@ -1,20 +1,24 @@
 {
-    "name": "autodoc/dynamo",
-    "description": "OMG Dynamo",
+    "name": "autodoc/dynamodb",
+    "description": "DynamoDb wrapper for your Laravel model and helpers",
+    "keywords": ["laravel", "dynamodb", "aws"],
+    "require": {
+        "aws/aws-sdk-php": "^3.0.0",
+        "illuminate/support": "~5.1",
+        "illuminate/database": "~5.1",
+        "paragonie/random_compat": "^1.1"
+    },
     "license": "MIT",
     "authors": [
         {
             "name": "Diego Ferreira Caetano",
-            "email": "dcaetano@autodoc.com.br"
+            "email": "di.cafe@hotmail.com"
         }
     ],
-    "require": {
-    	"php": ">=5.5.9",
-    	"aws/aws-sdk-php": "~3.0"
-    },
     "autoload": {
         "psr-4": {
-            "autodoc\\": "src/"
+            "Autodoc\\DynamoDb\\": "src/"
         }
-    }
+    },
+    "minimum-stability": "dev"
 }
