@@ -23,6 +23,11 @@ class DynamoDbQueryBuilder
      * @var DynamoDbClient
      */
     protected $client;
+    
+    private $filter;
+    private $expression;
+    private $cont = 0;
+    
 
     /**
      * When not using the iterator, you can store the lastEvaluatedKey to
@@ -78,9 +83,12 @@ class DynamoDbQueryBuilder
             throw new NotSupportedException('Closure in where clause is not supported');
         }
 
+        $this->generateExpression($column, $operator, $value).
+        
         $attributeValueList = $model->marshalItem([
             'AttributeValueList' => $value,
         ]);
+        
 
         $valueList = [$attributeValueList['AttributeValueList']];
 
@@ -94,6 +102,30 @@ class DynamoDbQueryBuilder
         ];
 
         return $this;
+    }
+    
+    
+    private function  generateExpression($column, $operator, $value)
+    {
+    	
+    	$this->cont++;
+    	$alias = 'v_'.$column.'_'.$cont;
+    	
+    	
+    	$filter = $column.' '.$operator.' :'.$alias;
+    	$expression =  [':'.$alias.'' => $model->marshalItem($value)];
+    	
+
+    	if($this->filter && $this->expression)
+    	{
+    		$this->filter .=  ' and '.$filter;
+    		$this->expression = array_merge($this->expression, $expression);
+    	}
+    	else
+   		{
+    		$this->filter =  $filter;
+    		$this->expression = $expression;
+    	}
     }
 
     /**
