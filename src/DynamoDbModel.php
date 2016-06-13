@@ -225,7 +225,7 @@ abstract  class DynamoDbModel {
     
     public function toArray()
     {
-    	$retorno = null;
+    	$retorno = [];
     
     	if($this->result)
     	{
