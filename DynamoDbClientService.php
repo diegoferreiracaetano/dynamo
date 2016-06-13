@@ -22,11 +22,10 @@ class DynamoDbClientService implements DynamoDbClientInterface
      */
     protected $attributeFilter;
 
-    public function __construct($config, Marshaler $marshaler, EmptyAttributeFilter $filter)
+    public function __construct($config, Marshaler $marshaler)
     {
         $this->client = new DynamoDbClient($config);
         $this->marshaler = $marshaler;
-        $this->attributeFilter = $filter;
     }
 
     /**
@@ -43,13 +42,5 @@ class DynamoDbClientService implements DynamoDbClientInterface
     public function getMarshaler()
     {
         return $this->marshaler;
-    }
-
-    /**
-     * @return \Autodoc\DynamoDb\EmptyAttributeFilter
-     */
-    public function getAttributeFilter()
-    {
-        return $this->attributeFilter;
     }
 }

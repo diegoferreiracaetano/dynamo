@@ -25,7 +25,7 @@ class DynamoDbServiceProvider extends ServiceProvider
         $this->app->singleton('Autodoc\DynamoDb\DynamoDbClientInterface', function ($app) use ($marshalerOptions) {
             $config = config('services.dynamodb');
             
-            $client = new DynamoDbClientService($config, new Marshaler($marshalerOptions), new EmptyAttributeFilter());
+            $client = new DynamoDbClientService($config, new Marshaler($marshalerOptions));
 
             return $client;
         });
