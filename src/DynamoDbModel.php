@@ -2,70 +2,22 @@
 
 namespace Autodoc\DynamoDb;
 
-use Exception;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Log;
+use Aws\DynamoDb\Exception as DynamoDbException;
+use Aws\DynamoDb\Marshaler;
 
-/**
- * Class DynamoDbModel.
- */
-abstract class DynamoDbModel extends Model
-{
-    /**
-     * Always set this to false since DynamoDb does not support incremental Id.
-     *
-     * @var bool
-     */
-    public $incrementing = false;
+abstract  class DynamoDbModel {
 
-    /**
-     * @var \Autodoc\DynamoDb\DynamoDbClientInterface
-     */
-    protected static $dynamoDb;
-
-    /**
-     * @var \Aws\DynamoDb\DynamoDbClient
-     */
-    protected $client;
-
-    /**
-     * @var \Aws\DynamoDb\Marshaler
-     */
-    protected $marshaler;
-
-    /**
-     * @var \Autodoc\DynamoDb\EmptyAttributeFilter
-     */
-    protected $attributeFilter;
-
-    /**
-     * Indexes.
-     * [
-     *     'global_index_key' => 'global_index_name',
-     *     'local_index_key' => 'local_index_name',
-     * ].
-     *
-     * @var array
-     */
-    protected $dynamoDbIndexKeys = [];
-
-
-    /**
-     * Array of your composite key.
-     * ['hash', 'range']
-     *
-     * @var array
-     */
-    protected $compositeKey = [];
-
-    public function __construct(array $attributes = [], DynamoDbClientService $dynamoDb = null)
+	protected static $dynamoDb;
+	protected $table;
+	protected $client; 
+	protected $marshaler;
+	private $filter;
+	private $expression;
+	private $where;
+	
+	 public function __construct(array $attributes = [], DynamoDbClientService $dynamoDb = null)
     {
-        $this->bootIfNotBooted();
-
-        $this->syncOriginal();
-
-        $this->fill($attributes);
-
+        
         if (is_null(static::$dynamoDb)) {
             static::$dynamoDb = $dynamoDb;
         }
@@ -81,161 +33,167 @@ abstract class DynamoDbModel extends Model
 
         $this->client = static::$dynamoDb->getClient();
         $this->marshaler = static::$dynamoDb->getMarshaler();
-        $this->attributeFilter = static::$dynamoDb->getAttributeFilter();
     }
+	
+	protected function setclient()
+	{
+		
+		$this->client = $this->getInstance();
+	}
+		
+	public function save(array $data)
+	{		
+	
+		$data = $this->marshaler->marshalItem($data);
+		
+		$params = ['TableName' => $this->table,'Item' => $data];
+	
+		try {
+				return $this->client->putItem($params);
 
-    public function save(array $options = [])
+		} catch (DynamoDbException $e) {
+				return $e->getMessage() ;
+		}
+	}
+	
+	
+	
+	public function get()
+	{
+		
+		$params = ['TableName' => $this->table];
+		
+		
+		if($this->where)		
+    		$params =array_merge($params,$this->where);
+
+			
+		$retorno = [];
+		try {
+			$response = $this->client->scan($params);
+			$retorno = array_map(function ($item) {
+				return $this->marshaler->unmarshalItem($item);
+		
+			}, $response['Items']);
+			
+				return $retorno;
+					
+		} catch (DynamoDbException $e) {
+			return $e->getMessage() ;
+		}
+	}
+	
+	public function getAll()
+	{
+
+		$params = ['TableName' => $this->table];
+		$retorno = [];
+		try {		
+			$response = $this->client->scan($params);
+			$retorno = array_map(function ($item) {
+				return $this->marshaler->unmarshalItem($item);
+				
+			}, $response['Items']);
+			
+			return $retorno;
+			
+		} catch (DynamoDbException $e) {
+				return $e->getMessage() ;
+		}
+	}
+	
+	
+	public function delete(array $data)
+	{
+		
+		$data =$this->marshaler->unmarshalItem($data);
+		
+		$params = ['TableName' => $this->table, 'key' => $data];
+		
+		try {
+				return $this->client->deleteItem($params);
+		} catch (DynamoDbException $e) {
+				return $e->getMessage() ;
+		}
+		
+	}
+	
+	
+	public function where($column, $operator = null, $value = null, $boolean = 'and')
     {
-        if (!$this->getKey()) {
-            $this->fireModelEvent('creating');
+        if ($boolean != 'and') {
+            throw new NotSupportedException('Only support "and" in where clause');
         }
 
-        return $this->newQuery()->save();
-    }
-
-    public function update(array $attributes = [], array $options = [])
-    {
-        return $this->fill($attributes)->save();
-    }
-
-    public static function create(array $attributes = [])
-    {
-        $model = new static;
-
-        $model->fill($attributes)->save();
-
-        return $model;
-    }
-
-    public function delete()
-    {
-        if (is_null($this->getKeyName())) {
-            throw new Exception('No primary key defined on model.');
-        }
-
-        if ($this->exists) {
-            if ($this->fireModelEvent('deleting') === false) {
-                return false;
+     
+        // If the column is an array, we will assume it is an array of key-value pairs
+        // and can add them each as a where clause. We will maintain the boolean we
+        // received when the method was called and pass it into the nested where.
+        if (is_array($column)) {
+            foreach ($column as $key => $value) {
+                return $this->where($key, '=', $value);
             }
-
-            $this->exists = false;
-
-            $success = $this->newQuery()->delete();
-
-            if ($success) {
-                $this->fireModelEvent('deleted', false);
-            }
-
-            return $success;
-        }
-    }
-
-    public static function all($columns = [])
-    {
-        $instance = new static;
-
-        return $instance->newQuery()->get($columns);
-    }
-
-    /**
-     * @return DynamoDbQueryBuilder
-     */
-    public function newQuery()
-    {
-        $builder = new DynamoDbQueryBuilder();
-
-        $builder->setModel($this);
-
-        $builder->setClient($this->client);
-
-        return $builder;
-    }
-
-    public function setUnfillableAttributes($attributes)
-    {
-        $keysToFill = array_diff(array_keys($attributes), $this->fillable);
-
-        foreach ($keysToFill as $key) {
-            $this->setAttribute($key, $attributes[$key]);
-        }
-    }
-
-    public function hasCompositeKey()
-    {
-        return !empty($this->compositeKey);
-    }
-
-    public function marshalItem($item)
-    {
-        return $this->marshaler->marshalItem($item);
-    }
-
-    public function unmarshalItem($item)
-    {
-        return $this->marshaler->unmarshalItem($item);
-    }
-
-    public function setId($id)
-    {
-        if (!is_array($id)) {
-            $this->setAttribute($this->getKeyName(), $id);
-
-            return $this;
         }
 
-        foreach ($id as $keyName => $value) {
-            $this->setAttribute($keyName, $value);
+        // Here we will make some assumptions about the operator. If only 2 values are
+        // passed to the method, we will assume that the operator is an equals sign
+        // and keep going. Otherwise, we'll require the operator to be passed in.
+        if (func_num_args() == 2) {
+            list($value, $operator) = [$operator, '='];
         }
+
+        // If the columns is actually a Closure instance, we will assume the developer
+        // wants to begin a nested where statement which is wrapped in parenthesis.
+        // We'll add that Closure to the query then return back out immediately.
+        if ($column instanceof Closure) {
+            throw new NotSupportedException('Closure in where clause is not supported');
+        }
+
+        // If the given operator is not found in the list of valid operators we will
+        // assume that the developer is just short-cutting the '=' operators and
+        // we will set the operators to '=' and set the values appropriately.
+        if (!ComparisonOperator::isValidOperator($operator)) {
+            list($value, $operator) = [$operator, '='];
+        }
+
+        // If the value is a Closure, it means the developer is performing an entire
+        // sub-select within the query and we will need to compile the sub-select
+        // within the where clause to get the appropriate query record results.
+        if ($value instanceof Closure) {
+            throw new NotSupportedException('Closure in where clause is not supported');
+        }
+
+        $this->generateExpression($column, $operator, $value).
+        
+        $this->where = [
+         	'FilterExpression' =>$this->filter,
+    		'ExpressionAttributeValues' => $this->expression
+        ];
 
         return $this;
     }
-
-    /**
-     * @return \Aws\DynamoDb\DynamoDbClient
-     */
-    public function getClient()
+    
+    
+    private function  generateExpression($column, $operator, $value)
     {
-        return $this->client;
-    }
+    	
+    	$this->cont++;
+    	$alias = 'v_'.$column.'_'.$this->cont;
+    	$valor = $this->marshaler->marshalItem([$value]);
+    	
+    	$filter = $column.' '.$operator.' :'.$alias;
+    	$expression =  [':'.$alias.'' => end($valor)];
+    	
 
-    /**
-     * @param \Aws\DynamoDb\DynamoDbClient $client
-     */
-    public function setClient($client)
-    {
-        $this->client = $client;
+    	if($this->filter && $this->expression)
+    	{
+    		$this->filter .=  ' and '.$filter;
+    		$this->expression = array_merge($this->expression, $expression);
+    	}
+    	else
+   		{
+    		$this->filter =  $filter;
+    		$this->expression = $expression;
+    	}
     }
-
-    /**
-     * @return array
-     */
-    public function getCompositeKey()
-    {
-        return $this->compositeKey;
-    }
-
-    /**
-     * @param array $compositeKey
-     */
-    public function setCompositeKey($compositeKey)
-    {
-        $this->compositeKey = $compositeKey;
-    }
-
-    /**
-     * @return array
-     */
-    public function getDynamoDbIndexKeys()
-    {
-        return $this->dynamoDbIndexKeys;
-    }
-
-    /**
-     * @param array $dynamoDbIndexKeys
-     */
-    public function setDynamoDbIndexKeys($dynamoDbIndexKeys)
-    {
-        $this->dynamoDbIndexKeys = $dynamoDbIndexKeys;
-    }
-
 }
