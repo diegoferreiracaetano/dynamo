@@ -16,7 +16,7 @@ class ComparisonOperator
             '<' => 'LT',
             '<=' => 'LE',
             'in' => 'IN',
-            '!=' => 'NE',
+        	'<>' => 'NE',
             'begins_with' => 'BEGINS_WITH',
             'between' => 'BETWEEN',
             'not_contains' => 'NOT_CONTAINS',
