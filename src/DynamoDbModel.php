@@ -11,10 +11,13 @@ abstract  class DynamoDbModel {
 	protected $table;
 	protected $client; 
 	protected $marshaler;
-	private $filter;
-	private $expression;
-	private $where;
-	private $result;
+	protected  $filter;
+	protected  $expression;
+	protected  $where = [];
+	protected  $result;
+	protected  $index;
+	protected  $indexName;
+	protected  $lastEvaluatedKey;
 	
 	 public function __construct(array $attributes = [], DynamoDbClientService $dynamoDb = null)
     {
@@ -35,12 +38,6 @@ abstract  class DynamoDbModel {
         $this->client = static::$dynamoDb->getClient();
         $this->marshaler = static::$dynamoDb->getMarshaler();
     }
-	
-	protected function setclient()
-	{
-		
-		$this->client = $this->getInstance();
-	}
 		
 	public function save(array $data)
 	{		
@@ -49,9 +46,10 @@ abstract  class DynamoDbModel {
 		
 		$params = ['TableName' => $this->table,'Item' => $data];
 	
-		try {
-				return $this->client->putItem($params);
-
+		try 
+		{
+			return $this->client->putItem($params);
+				
 		} catch (DynamoDbException $e) {
 				return $e->getMessage() ;
 		}
@@ -59,58 +57,58 @@ abstract  class DynamoDbModel {
 	
 	
 	
-	public function get()
+	public function get($columns = [])
 	{
 		
 		$params = ['TableName' => $this->table];
 		
-		
 		if($this->where)		
     		$params =array_merge($params,$this->where);
-
-			
-		$retorno = [];
-		try {
-			$response = $this->client->scan($params);
-			$retorno = array_map(function ($item) {
-				return $this->marshaler->unmarshalItem($item);
 		
-			}, $response['Items']);
+    	if($this->lastEvaluatedKey)
+    		$params['ExclusiveStartKey'] = $this->lastEvaluatedKey;
+    	
+    	if($columns)
+    		$params['ProjectionExpression'] = head($columns);
+    	
+    		
+		$retorno = [];
+	
+		try 
+		{			
+			if($this->index)
+				$response = $this->client->query($params);
+			else 
+				$response = $this->client->scan($params);
+							
+			if(isset($response) && isset($response['LastEvaluatedKey']))
+			{
+				 $this->lastEvaluatedKey = $response['LastEvaluatedKey'];
+			}
 			
-				$this->result = $retorno;
+			foreach ($response['Items'] as $item) 
+			{
+				$retorno[] = $this->marshaler->unmarshalItem($item);		
+			}	
+		
+			$this->result = $retorno;
 			
-			return $this;
-					
-		} catch (DynamoDbException $e) {
+			return $this;	
+		} 
+		catch (DynamoDbException $e) 
+		{
 			return $e->getMessage() ;
 		}
 	}
 	
 	public function all()
 	{
-
-		$params = ['TableName' => $this->table];
-		$retorno = [];
-		try {		
-			$response = $this->client->scan($params);
-			$retorno = array_map(function ($item) {
-				return $this->marshaler->unmarshalItem($item);
-				
-			}, $response['Items']);
-			
-			$this->result = $retorno;
-			
-			return $this;
-			
-		} catch (DynamoDbException $e) {
-				return $e->getMessage() ;
-		}
+		$this->get();
 	}
 	
 	
 	public function delete(array $data)
 	{
-		
 		$data =$this->marshaler->unmarshalItem($data);
 		
 		$params = ['TableName' => $this->table, 'key' => $data];
@@ -131,56 +129,86 @@ abstract  class DynamoDbModel {
         if ($boolean != 'and') {
             throw new NotSupportedException('Only support "and" in where clause');
         }
-
-     
-        // If the column is an array, we will assume it is an array of key-value pairs
-        // and can add them each as a where clause. We will maintain the boolean we
-        // received when the method was called and pass it into the nested where.
         if (is_array($column)) {
             foreach ($column as $key => $value) {
                 return $this->where($key, '=', $value);
             }
         }
 
-        // Here we will make some assumptions about the operator. If only 2 values are
-        // passed to the method, we will assume that the operator is an equals sign
-        // and keep going. Otherwise, we'll require the operator to be passed in.
         if (func_num_args() == 2) {
             list($value, $operator) = [$operator, '='];
         }
 
-        // If the columns is actually a Closure instance, we will assume the developer
-        // wants to begin a nested where statement which is wrapped in parenthesis.
-        // We'll add that Closure to the query then return back out immediately.
         if ($column instanceof Closure) {
             throw new NotSupportedException('Closure in where clause is not supported');
         }
 
-        // If the given operator is not found in the list of valid operators we will
-        // assume that the developer is just short-cutting the '=' operators and
-        // we will set the operators to '=' and set the values appropriately.
         if (!ComparisonOperator::isValidOperator($operator)) {
             list($value, $operator) = [$operator, '='];
         }
 
-        // If the value is a Closure, it means the developer is performing an entire
-        // sub-select within the query and we will need to compile the sub-select
-        // within the where clause to get the appropriate query record results.
         if ($value instanceof Closure) {
             throw new NotSupportedException('Closure in where clause is not supported');
         }
 
-        $this->generateExpression($column, $operator, $value).
-        
-        $this->where = [
-         	'FilterExpression' =>$this->filter,
-    		'ExpressionAttributeValues' => $this->expression
-        ];
-
+        $this->generateExpression($column, $operator, $value);
+    	$this->preencheWhere();
+     
         return $this;
     }
     
+    protected  function preencheWhere()
+    {
+    	
+    	if($this->filter)
+    		$this->where['FilterExpression'] =$this->filter;
+    	
+    	if($this->indexName)
+    		$this->where['IndexName'] = $this->indexName;
+    	
+    	if($this->index)
+    		$this->where['KeyConditionExpression'] = $this->index;
+    	
+    	if($this->expression)
+    		$this->where['ExpressionAttributeValues'] =$this->expression;
+    		    	
+    }
     
+    
+    public function whereIndex($index,$column, $operator = null, $value = null, $boolean = 'and')
+    {
+    	if ($boolean != 'and') {
+    		throw new NotSupportedException('Only support "and" in where clause');
+    	}
+    	if (is_array($column)) {
+    		foreach ($column as $key => $value) {
+    			return $this->where($key, '=', $value);
+    		}
+    	}
+    
+    	if (func_num_args() == 2) {
+    		list($value, $operator) = [$operator, '='];
+    	}
+    
+    	if ($column instanceof Closure) {
+    		throw new NotSupportedException('Closure in where clause is not supported');
+    	}
+    
+    	if (!ComparisonOperator::isValidOperator($operator)) {
+    		list($value, $operator) = [$operator, '='];
+    	}
+    
+    	if ($value instanceof Closure) {
+    		throw new NotSupportedException('Closure in where clause is not supported');
+    	}
+    	$this->indexName = $index;
+    	$this->generateExpressionIndex($column, $operator, $value).
+    	$this->preencheWhere();
+    
+    	return $this;
+    }
+    
+       
     private function  generateExpression($column, $operator, $value)
     {
     	
@@ -191,15 +219,51 @@ abstract  class DynamoDbModel {
     	$filter = $column.' '.$operator.' :'.$alias;
     	$expression =  [':'.$alias.'' => end($valor)];
     	
-
-    	if($this->filter && $this->expression)
+ 
+    	if($this->filter)
     	{
-    		$this->filter .=  ' and '.$filter;
+    		$this->filter.=  ' and '.$filter;
+    	}
+    	else 
+    		{
+    		$this->filter  =  $filter;
+    	}
+    	
+    	if ($this->expression){
+    		
     		$this->expression = array_merge($this->expression, $expression);
     	}
     	else
    		{
-    		$this->filter =  $filter;
+    		$this->expression = $expression;
+    	}
+    }
+    
+    private function  generateExpressionIndex($column, $operator, $value)
+    {
+    	 
+    	$this->cont++;
+    	$alias = 'v_'.$column.'_'.$this->cont;
+    	$valor = $this->marshaler->marshalItem([$value]);
+    	 
+    	$filter = $column.' '.$operator.' :'.$alias;
+    	$expression =  [':'.$alias.'' => end($valor)];
+    	 
+    
+    	if($this->index)
+    	{
+    		$this->index.=  ' and '.$filter;
+    	}
+    	else
+    		{
+    		$this->index  =  $filter;
+    	}
+    	if ($this->expression)
+    	{
+    		$this->expression = array_merge($this->expression, $expression);
+    	}
+    	else
+    		{	
     		$this->expression = $expression;
     	}
     }
